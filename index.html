@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="id">
 <head>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <meta charset="UTF-8" />
   <title>Supply Chain GIS App</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -1079,12 +1080,12 @@
     <div class="login-card">
       <div class="login-logo">SC</div>
       <div class="login-title">Supply Chain GIS</div>
-      <div class="login-subtitle">Trial login lokal untuk simulasi akun dan role access.</div>
+      <div class="login-subtitle">Login Supabase untuk prototype multi-device dan multi-user.</div>
 
       <form onsubmit="loginUser(event)">
         <div class="form-field">
-          <label for="loginUsername">Username</label>
-          <input id="loginUsername" placeholder="admin / management / driver" autocomplete="username" required />
+          <label for="loginUsername">Email</label>
+          <input id="loginUsername" type="email" placeholder="management@email.com" autocomplete="username" required />
         </div>
         <div class="form-field">
           <label for="loginPassword">Password</label>
@@ -1095,9 +1096,9 @@
       </form>
 
       <div class="demo-account-box">
-        <div><b>Demo Admin</b> admin / admin123</div>
-        <div><b>Demo Management</b> management / management123</div>
-        <div><b>Demo Driver</b> driver / driver123</div>
+        <div><b>Admin</b> admin@email.com / admin123</div>
+        <div><b>Management</b> management@email.com / management123</div>
+        <div><b>Driver</b> driver@email.com / driver123</div>
       </div>
     </div>
   </div>
@@ -1105,7 +1106,7 @@
     <div class="app-title-row">
       <div class="app-title">Supply Chain <span>GIS</span></div>
       <div class="user-area">
-        <div class="app-status" id="userBadge">LOGIN TRIAL</div>
+        <div class="app-status" id="userBadge">SUPABASE LOGIN</div>
         <button class="logout-btn" type="button" onclick="logoutUser()">Logout</button>
       </div>
     </div>
@@ -1164,7 +1165,7 @@
       </section>
 
       <section class="section">
-        <div class="section-head"><div class="section-label">Realtime Overview</div><div class="section-note">Update otomatis dari localStorage</div></div>
+        <div class="section-head"><div class="section-label">Realtime Overview</div><div class="section-note">Update otomatis dari Supabase</div></div>
         <div class="summary-grid">
           <div class="summary-card card-customer"><div class="icon-wrap">🏪</div><div><div class="val" id="valCustomer">0</div><div class="lbl">Customer</div></div></div>
           <div class="summary-card card-order"><div class="icon-wrap">📦</div><div><div class="val" id="valOrder">0</div><div class="lbl">Order</div></div></div>
@@ -1471,28 +1472,29 @@
       { key: "ayam geprek", color: "#ff9f43", pill: "pill-geprek" }
     ];
 
-    let customers = safeParseArray("customers");
-    let orders = safeParseArray("orders");
-    let drivers = safeParseArray("drivers");
-    let priceData = safeParseArray("priceData");
-    let barangMasuk = safeParseArray("barangMasuk");
-    let barangKeluar = safeParseArray("barangKeluar");
-    let tagihan = safeParseArray("tagihan");
-    let invoices = safeParseArray("invoices");
-    let stockAudit = safeParseArray("stockAudit");
-    let jurnalHarian = safeParseArray("jurnalHarian");
-    let absensi = safeParseArray("absensi");
+    /*
+      ==========================================================
+      SUPABASE CONFIG
+      Isi dua value ini dari Supabase:
+      Project Settings → API → Project URL dan anon public key.
+      ==========================================================
+    */
+    const SUPABASE_URL = "PASTE_SUPABASE_PROJECT_URL_DI_SINI";
+    const SUPABASE_ANON_KEY = "PASTE_SUPABASE_ANON_PUBLIC_KEY_DI_SINI";
+    const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-    let activeTab = "management";
-    let activeFilter = "all";
-    let selectedDriverIndex = null;
-    let currentUser = null;
-    let appBooted = false;
-
-    const DEMO_USERS = [
-      { username: "admin", password: "admin123", role: "admin", name: "Admin Operator" },
-      { username: "management", password: "management123", role: "management", name: "Management Team" },
-      { username: "driver", password: "driver123", role: "driver", name: "Driver Demo" }
+    const APP_COLLECTION_TYPES = [
+      "customers",
+      "orders",
+      "drivers",
+      "priceData",
+      "barangMasuk",
+      "barangKeluar",
+      "tagihan",
+      "invoices",
+      "stockAudit",
+      "jurnalHarian",
+      "absensi"
     ];
 
     const ROLE_TABS = {
@@ -1500,6 +1502,26 @@
       admin: ["admin", "finance"],
       driver: ["driver"]
     };
+
+    let customers = [];
+    let orders = [];
+    let drivers = [];
+    let priceData = [];
+    let barangMasuk = [];
+    let barangKeluar = [];
+    let tagihan = [];
+    let invoices = [];
+    let stockAudit = [];
+    let jurnalHarian = [];
+    let absensi = [];
+
+    let activeTab = "management";
+    let activeFilter = "all";
+    let selectedDriverIndex = null;
+    let currentUser = null;
+    let appBooted = false;
+    let collectionRecordIds = {};
+
     let managementMap = null;
     let databaseMap = null;
     let managementMapLoaded = false;
@@ -1507,12 +1529,19 @@
     let managementMarkers = [];
     let databaseMarkers = [];
 
-    function safeParseObject(key){
+    function isSupabaseConfigured(){
+      return SUPABASE_URL && SUPABASE_ANON_KEY &&
+        !SUPABASE_URL.includes("PASTE_") &&
+        !SUPABASE_ANON_KEY.includes("PASTE_");
+    }
+
+    function readLegacyLocalArray(key){
       try {
-        const raw = localStorage.getItem(key);
-        return raw ? JSON.parse(raw) : null;
+        const raw = window.localStorage ? window.localStorage.getItem(key) : null;
+        const data = raw ? JSON.parse(raw) : [];
+        return Array.isArray(data) ? data : [];
       } catch(err){
-        return null;
+        return [];
       }
     }
 
@@ -1530,28 +1559,90 @@
       });
     }
 
-    function loginUser(event){
-      event.preventDefault();
-      const username = normalizeText(document.getElementById("loginUsername")?.value);
-      const password = document.getElementById("loginPassword")?.value || "";
-      const found = DEMO_USERS.find(user => user.username === username && user.password === password);
+    async function loadCurrentUserProfile(){
+      const { data: userData, error: userError } = await supabaseClient.auth.getUser();
 
-      if(!found){
-        showMessage("loginMessage", "Username atau password salah.", "error");
+      if(userError || !userData?.user){
+        throw new Error(userError?.message || "User Supabase tidak ditemukan.");
+      }
+
+      const authUser = userData.user;
+      let { data: profile, error: profileError } = await supabaseClient
+        .from("profiles")
+        .select("id,name,role")
+        .eq("id", authUser.id)
+        .maybeSingle();
+
+      if(profileError){
+        throw profileError;
+      }
+
+      if(!profile){
+        const fallbackName = authUser.email ? authUser.email.split("@")[0] : "User";
+        const { data: insertedProfile, error: insertError } = await supabaseClient
+          .from("profiles")
+          .insert({
+            id: authUser.id,
+            name: authUser.user_metadata?.name || fallbackName,
+            role: authUser.user_metadata?.role || "driver"
+          })
+          .select("id,name,role")
+          .single();
+
+        if(insertError) throw insertError;
+        profile = insertedProfile;
+      }
+
+      currentUser = {
+        id: authUser.id,
+        email: authUser.email,
+        username: authUser.email,
+        role: profile.role || "driver",
+        name: profile.name || authUser.email || "User",
+        loginAt: new Date().toISOString()
+      };
+
+      return currentUser;
+    }
+
+    async function loginUser(event){
+      event.preventDefault();
+
+      if(!isSupabaseConfigured()){
+        showMessage("loginMessage", "Isi SUPABASE_URL dan SUPABASE_ANON_KEY dulu di bagian SUPABASE CONFIG.", "error");
         return;
       }
 
-      currentUser = { username: found.username, role: found.role, name: found.name, loginAt: new Date().toISOString() };
-      localStorage.setItem("appSession", JSON.stringify(currentUser));
-      startAppAfterLogin();
+      const email = document.getElementById("loginUsername")?.value.trim();
+      const password = document.getElementById("loginPassword")?.value || "";
+
+      const { error } = await supabaseClient.auth.signInWithPassword({
+        email,
+        password
+      });
+
+      if(error){
+        showMessage("loginMessage", error.message, "error");
+        return;
+      }
+
+      try {
+        await loadCurrentUserProfile();
+        await startAppAfterLogin();
+      } catch(err){
+        showMessage("loginMessage", err.message || "Login berhasil, tapi profile gagal dibaca.", "error");
+      }
     }
 
-    function logoutUser(){
-      localStorage.removeItem("appSession");
+    async function logoutUser(){
+      await supabaseClient.auth.signOut();
+      currentUser = null;
+      appBooted = false;
+      document.body.classList.add("locked");
       location.reload();
     }
 
-    function startAppAfterLogin(){
+    async function startAppAfterLogin(){
       document.body.classList.remove("locked");
       updateUserBadge();
       applyRoleAccess();
@@ -1561,40 +1652,164 @@
 
       if(!appBooted){
         appBooted = true;
-        setTimeout(() => {
-          bootApp();
-          if(defaultTab === "management"){
-            initManagementMap();
-            forceResizeManagementMap();
-          }
-        }, 250);
+        await bootApp();
+      } else {
+        refreshAllViews();
+      }
+
+      if(defaultTab === "management"){
+        initManagementMap();
+        forceResizeManagementMap();
       }
     }
 
-    function initAuth(){
-      const session = safeParseObject("appSession");
-      const validSession = session && DEMO_USERS.some(user => user.username === session.username && user.role === session.role);
-
-      if(validSession){
-        currentUser = session;
-        startAppAfterLogin();
-      } else {
+    async function initAuth(){
+      if(!isSupabaseConfigured()){
         currentUser = null;
         document.body.classList.add("locked");
+        showMessage("loginMessage", "Isi SUPABASE_URL dan SUPABASE_ANON_KEY di code sebelum login.", "error");
+        return;
+      }
+
+      const { data, error } = await supabaseClient.auth.getSession();
+
+      if(error || !data?.session){
+        currentUser = null;
+        document.body.classList.add("locked");
+        return;
+      }
+
+      try {
+        await loadCurrentUserProfile();
+        await startAppAfterLogin();
+      } catch(err){
+        console.error(err);
+        currentUser = null;
+        document.body.classList.add("locked");
+        showMessage("loginMessage", err.message || "Session ditemukan, tapi profile gagal dibaca.", "error");
       }
     }
 
-    function safeParseArray(key){
-      try {
-        const raw = localStorage.getItem(key);
-        const data = raw ? JSON.parse(raw) : [];
-        return Array.isArray(data) ? data : [];
-      } catch(err){
-        console.warn(`${key} bukan JSON valid`, err);
+    async function loadCollection(key){
+      const { data, error } = await supabaseClient
+        .from("app_records")
+        .select("id,payload,updated_at")
+        .eq("record_type", key)
+        .order("updated_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if(error){
+        console.error(`Gagal load ${key}`, error);
         return [];
       }
+
+      if(data){
+        collectionRecordIds[key] = data.id;
+        const items = data.payload?.items;
+        return Array.isArray(items) ? items : [];
+      }
+
+      // Import sekali dari localStorage lama kalau ada data legacy di browser ini.
+      const legacy = readLegacyLocalArray(key);
+      if(legacy.length){
+        await saveCollection(key, legacy);
+        return legacy;
+      }
+
+      return [];
     }
-    function saveArray(key, value){ localStorage.setItem(key, JSON.stringify(value)); }
+
+    async function saveCollection(key, value){
+      if(!currentUser?.id) return;
+      const payload = {
+        items: Array.isArray(value) ? value : [],
+        updatedAtClient: new Date().toISOString()
+      };
+
+      if(collectionRecordIds[key]){
+        const { error } = await supabaseClient
+          .from("app_records")
+          .update({
+            payload,
+            updated_at: new Date().toISOString()
+          })
+          .eq("id", collectionRecordIds[key]);
+
+        if(error) throw error;
+        return;
+      }
+
+      const { data: existing, error: lookupError } = await supabaseClient
+        .from("app_records")
+        .select("id")
+        .eq("record_type", key)
+        .order("updated_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if(lookupError) throw lookupError;
+
+      if(existing?.id){
+        collectionRecordIds[key] = existing.id;
+        const { error } = await supabaseClient
+          .from("app_records")
+          .update({
+            payload,
+            updated_at: new Date().toISOString()
+          })
+          .eq("id", existing.id);
+
+        if(error) throw error;
+        return;
+      }
+
+      const { data, error } = await supabaseClient
+        .from("app_records")
+        .insert({
+          record_type: key,
+          payload,
+          created_by: currentUser.id
+        })
+        .select("id")
+        .single();
+
+      if(error) throw error;
+      collectionRecordIds[key] = data.id;
+    }
+
+    function setCollectionState(key, value){
+      const data = Array.isArray(value) ? value : [];
+      if(key === "customers") customers = data;
+      if(key === "orders") orders = data;
+      if(key === "drivers") drivers = data;
+      if(key === "priceData") priceData = data;
+      if(key === "barangMasuk") barangMasuk = data;
+      if(key === "barangKeluar") barangKeluar = data;
+      if(key === "tagihan") tagihan = data;
+      if(key === "invoices") invoices = data;
+      if(key === "stockAudit") stockAudit = data;
+      if(key === "jurnalHarian") jurnalHarian = data;
+      if(key === "absensi") absensi = data;
+    }
+
+    async function loadAllCollections(){
+      const results = await Promise.all(APP_COLLECTION_TYPES.map(async key => {
+        const value = await loadCollection(key);
+        return [key, value];
+      }));
+
+      results.forEach(([key, value]) => setCollectionState(key, value));
+    }
+
+    function saveArray(key, value){
+      saveCollection(key, value).catch(err => {
+        console.error(`Gagal sync ${key} ke Supabase`, err);
+        const msg = document.getElementById("adminMessage") ? "adminMessage" : null;
+        if(msg) showMessage(msg, `Data ${key} gagal sync ke Supabase: ${err.message}`, "error");
+      });
+    }
+
     function toNumber(value){ const n = Number(value); return Number.isFinite(n) ? n : 0; }
     function normalizeText(value){ return String(value || "").trim().toLowerCase(); }
     function titleCase(text){ return String(text || "").trim().split(" ").filter(Boolean).map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(" "); }
@@ -2841,8 +3056,11 @@
       if(managementMap && managementMapLoaded) renderManagementMarkers(false);
       if(databaseMap && databaseMapLoaded) renderDatabaseMarkers(false);
     }
-    function bootApp(){
+    async function bootApp(){
       if(!currentUser) return;
+
+      await loadAllCollections();
+
       renderSummary();
       renderStock();
       renderHistoricalRecap();
@@ -2855,7 +3073,7 @@
       setDefaultDates();
       initManagementMap();
     }
-    bootApp();
+    initAuth();
   </script>
   <script>
   if ("serviceWorker" in navigator) {
